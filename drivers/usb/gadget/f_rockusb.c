@@ -20,7 +20,10 @@
 #include <scsi.h>
 #include <stdlib.h>
 #include <usbplug.h>
+
+#ifdef CONFIG_ROCKCHIP_VENDOR_PARTITION
 #include <asm/arch/vendor.h>
+#endif
 #include <rockusb.h>
 
 #define ROCKUSB_INTERFACE_CLASS	0xff
@@ -454,6 +457,7 @@ out:
 	return rc;
 }
 
+#ifdef CONFIG_ROCKCHIP_VENDOR_PARTITION
 static int rkusb_do_vs_write(struct fsg_common *common)
 {
 	struct fsg_lun		*curlun = &common->luns[common->lun];
@@ -516,7 +520,8 @@ static int rkusb_do_vs_write(struct fsg_common *common)
 			/* Perform the write */
 			vhead = (struct vendor_item *)bh->buf;
 			data  = bh->buf + sizeof(struct vendor_item);
-			if (CONFIG_IS_ENABLED(ROCKCHIP_VENDOR_PARTITION) && !type) {
+
+			if (!type) {
 				#ifndef CONFIG_SUPPORT_USBPLUG
 				if (vhead->id == HDCP_14_HDMI_ID ||
 				    vhead->id == HDCP_14_HDMIRX_ID ||
@@ -674,7 +679,8 @@ static int rkusb_do_vs_read(struct fsg_common *common)
 		vhead = (struct vendor_item *)bh->buf;
 		data  = bh->buf + sizeof(struct vendor_item);
 		vhead->id = get_unaligned_be16(&common->cmnd[2]);
-		if (CONFIG_IS_ENABLED(ROCKCHIP_VENDOR_PARTITION) && !type) {
+
+		if (!type) {
 			/* Vendor storage */
 			rc = vendor_storage_read(vhead->id,
 						 (char __user *)data,
@@ -744,52 +750,6 @@ static int rkusb_do_vs_read(struct fsg_common *common)
 
 	return -EIO; /* No default reply */
 }
-
-#if CONFIG_PSTORE
-static int rkusb_do_uart_debug_read(struct fsg_common *common)
-{
-	struct fsg_buffhd	*bh;
-	int			*debug_head;
-	int			debug_data_size;
-	int			rc;
-
-	if (common->data_size >= (u32)FSG_BUFLEN)
-		return -EINVAL;
-
-	common->residue         = common->data_size;
-	common->usb_amount_left = common->data_size;
-
-	/* Carry out the file reads */
-	if (unlikely(common->data_size == 0) || unlikely(!gd->pstore_addr))
-		return -EIO; /* No default reply */
-
-	/* Wait for the next buffer to become available */
-	bh = common->next_buffhd_to_fill;
-	while (bh->state != BUF_STATE_EMPTY) {
-		rc = sleep_thread(common);
-		if (rc)
-			return rc;
-	}
-
-	debug_head = (int *)gd->pstore_addr;
-	debug_data_size = debug_head[2];
-	if (debug_data_size > FSG_BUFLEN - 8)
-		debug_data_size = FSG_BUFLEN - 8;
-	if (debug_data_size > common->data_size - 8)
-		debug_data_size = common->data_size - 8;
-
-	debug_head = (int *)bh->buf;
-	debug_head[0] = 0x55424544;
-	debug_head[1] = debug_data_size + 8;
-
-	memcpy((void *)(bh->buf + 8), (void *)(gd->pstore_addr + 12), debug_data_size);
-
-	common->residue   -= common->data_size;
-	bh->inreq->length = common->data_size;
-	bh->state         = BUF_STATE_FULL;
-
-	return -EIO; /* No default reply */
-}
 #endif
 
 static int rkusb_do_switch_storage(struct fsg_common *common)
@@ -825,7 +785,6 @@ static int rkusb_do_switch_storage(struct fsg_common *common)
 	case BOOT_TYPE_SATA:
 		type = IF_TYPE_SCSI;
 		devnum = 0;
-		scsi_scan(true);
 		break;
 #endif
 	default:
@@ -949,10 +908,6 @@ static int rkusb_do_read_capacity(struct fsg_common *common,
 	    (devnum == BLK_MTD_NAND ||
 	    devnum == BLK_MTD_SPI_NAND))
 		buf[0] |= (1 << 6);
-
-#ifdef CONFIG_PSTORE
-	buf[0] |= (1 << 5);
-#endif
 
 #if !defined(CONFIG_ROCKCHIP_RV1126)
 	if (type == IF_TYPE_MTD && devnum == BLK_MTD_SPI_NOR)
@@ -1100,6 +1055,7 @@ static int rkusb_cmd_process(struct fsg_common *common,
 		rc = RKUSB_RC_FINISHED;
 		break;
 
+#ifdef CONFIG_ROCKCHIP_VENDOR_PARTITION
 	case RKUSB_VS_WRITE:
 		*reply = rkusb_do_vs_write(common);
 		rc = RKUSB_RC_FINISHED;
@@ -1109,20 +1065,11 @@ static int rkusb_cmd_process(struct fsg_common *common,
 		*reply = rkusb_do_vs_read(common);
 		rc = RKUSB_RC_FINISHED;
 		break;
-
-#ifdef CONFIG_PSTORE
-	case RKUSB_UART_READ:
-		rkusb_fixup_cbwcb(common, bh);
-		*reply = rkusb_do_uart_debug_read(common);
-		rc = RKUSB_RC_FINISHED;
-		break;
 #endif
-
 	case RKUSB_SWITCH_STORAGE:
 		*reply = rkusb_do_switch_storage(common);
 		rc = RKUSB_RC_FINISHED;
 		break;
-
 	case RKUSB_GET_STORAGE_MEDIA:
 		*reply = rkusb_do_get_storage_info(common, bh);
 		rc = RKUSB_RC_FINISHED;

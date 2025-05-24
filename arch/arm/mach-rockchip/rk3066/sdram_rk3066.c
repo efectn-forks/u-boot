@@ -667,7 +667,7 @@ out:
 	return ret;
 }
 
-static int sdram_get_biu_config(struct rk3066_sdram_params *sdram_params)
+static int sdram_get_niu_config(struct rk3066_sdram_params *sdram_params)
 {
 	int i, tmp, size, ret = 0;
 
@@ -679,10 +679,10 @@ static int sdram_get_biu_config(struct rk3066_sdram_params *sdram_params)
 		if (tmp == ddrconf_table[i])
 			break;
 	if (i >= size) {
-		debug("biu config not found\n");
+		debug("niu config not found\n");
 		ret = -EINVAL;
 	} else {
-		debug("biu config %d\n", i);
+		debug("niu config %d\n", i);
 		sdram_params->base.ddrconfig = i;
 	}
 
@@ -771,8 +771,8 @@ static int sdram_init(struct dram_info *dram,
 		if (ret)
 			goto error;
 	}
-	/* Find BIU DDR configuration */
-	ret = sdram_get_biu_config(sdram_params);
+	/* Find NIU DDR configuration */
+	ret = sdram_get_niu_config(sdram_params);
 	if (ret)
 		goto error;
 

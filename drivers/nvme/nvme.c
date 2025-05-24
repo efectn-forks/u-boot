@@ -682,13 +682,8 @@ int nvme_scan_namespace(void)
 
 	uclass_foreach_dev(dev, uc) {
 		ret = device_probe(dev);
-		if (ret) {
-			printf("Failed to probe '%s': err=%dE\n", dev->name,
-				ret);
-			/* Bail if we ran out of memory, else keep trying */
-			if (ret != -EBUSY)
-				return ret;
-		}
+		if (ret)
+			return ret;
 	}
 
 	return 0;
@@ -886,8 +881,8 @@ static int nvme_probe(struct udevice *udev)
 	ndev->bar = dm_pci_map_bar(udev, PCI_BASE_ADDRESS_0,
 			PCI_REGION_MEM);
 	if (readl(&ndev->bar->csts) == -1) {
-		ret = -EBUSY;
-		printf("Error: %s: Controller not ready!\n", udev->name);
+		ret = -ENODEV;
+		printf("Error: %s: Out of memory!\n", udev->name);
 		goto free_nvme;
 	}
 

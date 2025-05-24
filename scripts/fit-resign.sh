@@ -16,34 +16,18 @@ set -e
 
 IMG_UBOOT="uboot.img"
 IMG_BOOT="boot.img"
-IMG_RECOVERY="recovery.img"
 
 function usage_resign()
 {
 	echo
 	echo "usage:"
-	echo "    $0 -f [itb] -s [sig] -n [num of U-Boot copies] -k [KB of each U-Boot copy]"
+	echo "    $0 -f [itb] -s [sig]"
 	echo
-}
-
-function arg_check_decimal()
-{
-	if [ -z $1 ]; then
-		usage_resign
-		exit 1
-	fi
-
-	decimal=`echo $1 |sed 's/[0-9]//g'`
-	if [ ! -z ${decimal} ]; then
-		echo "ERROR: $1 is not decimal integer"
-		usage_resign
-		exit 1
-	fi
 }
 
 function fit_resign()
 {
-	if [ $# -ne 4 -a $# -ne 8 ]; then
+	if [ $# -ne 4 ]; then
 		usage_resign
 		exit 1
 	fi
@@ -56,16 +40,6 @@ function fit_resign()
 				;;
 			-s)
 				SIG=$2
-				shift 2
-				;;
-			-n)
-				ITB_MAX_NUM=$2
-				arg_check_decimal $2
-				shift 2
-				;;
-			-k)
-				ITB_MAX_KB=$2
-				arg_check_decimal $2
 				shift 2
 				;;
 			*)
@@ -116,12 +90,8 @@ function fit_resign()
 	echo
 
 	if fdtget -l ${ITB_RESIGN} /images/uboot >/dev/null 2>&1 ; then
-		if [ -z ${ITB_MAX_NUM} ]; then
-			ITB_MAX_NUM=`sed -n "/SPL_FIT_IMAGE_MULTIPLE/p" .config | awk -F "=" '{ print $2 }'`
-		fi
-		if [ -z ${ITB_MAX_KB} ]; then
-			ITB_MAX_KB=`sed  -n "/SPL_FIT_IMAGE_KB/p" .config | awk -F "=" '{ print $2 }'`
-		fi
+		ITB_MAX_NUM=`sed -n "/SPL_FIT_IMAGE_MULTIPLE/p" .config | awk -F "=" '{ print $2 }'`
+		ITB_MAX_KB=`sed  -n "/SPL_FIT_IMAGE_KB/p" .config | awk -F "=" '{ print $2 }'`
 		ITB_MAX_BS=$((ITB_MAX_KB*1024))
 		ITB_BS=`ls -l ${ITB} | awk '{ print $5 }'`
 		if [ ${ITB_BS} -gt ${ITB_MAX_BS} ]; then
@@ -136,18 +106,13 @@ function fit_resign()
 			truncate -s %${ITB_MAX_KB}K ${IMG_UBOOT}
 		done
 		echo "Image(re-signed):  ${IMG_UBOOT} is ready"
-	elif [ "${ITB}" == "boot.itb" ]; then
+	else
 		cp ${ITB_RESIGN} ${IMG_BOOT}
 		echo "Image(re-signed):  ${IMG_BOOT} is ready"
-	elif [ "${ITB}" == "recovery.itb" ]; then
-		cp ${ITB_RESIGN} ${IMG_RECOVERY}
-		echo "Image(re-signed):  ${IMG_RECOVERY} is ready"
-	else
-		usage_resign
-		exit 1
 	fi
 
 	rm -f ${ITB}.half1 ${ITB}.half2 ${ITB_RESIGN}
 }
 
 fit_resign $*
+

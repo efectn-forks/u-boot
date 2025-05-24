@@ -435,7 +435,7 @@
 
 	usb2phy_grf: syscon@ff450000 {
 		compatible = "rockchip,rk3328-usb2phy-grf",
-			     "syscon", "simple-mfd";
+			     "simple-mfd", "syscon";
 		reg = <0x0 0xff450000 0x0 0x10000>;
 		#address-cells = <1>;
 		#size-cells = <1>;

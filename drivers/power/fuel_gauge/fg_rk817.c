@@ -20,7 +20,7 @@
 
 DECLARE_GLOBAL_DATA_PTR;
 
-static int dbg_enable;
+static int dbg_enable = 0;
 #define DBG(args...) \
 	do { \
 		if (dbg_enable) { \
@@ -162,6 +162,8 @@ static int dbg_enable;
 /* sample resistor and division */
 #define SAMPLE_RES_10mR		10
 #define SAMPLE_RES_20mR		20
+#define SAMPLE_RES_DIV1		1
+#define SAMPLE_RES_DIV2		2
 
 #define CHRG_CT_EN		BIT(1)
 #define MIN_FCC			500
@@ -174,19 +176,19 @@ static int dbg_enable;
 #define VOL_OUPUT_INSTANT_MODE	0x02
 
 #define ADC_TO_CURRENT(adc_value, samp_res)	\
-	(adc_value * 1720 / 1000 / samp_res)
+	(adc_value * 172 / 1000 / samp_res)
 #define CURRENT_TO_ADC(current, samp_res)	\
-	(current * 1000 * samp_res / 1720)
+	(current * 1000 * samp_res / 172)
 
 #define ADC_TO_CAPACITY(adc_value, samp_res)	\
-	(adc_value / 1000 * 1720 / 3600 / samp_res)
+	(adc_value / 1000 * 172 / 3600 / samp_res)
 #define CAPACITY_TO_ADC(capacity, samp_res)	\
-	(capacity * samp_res * 3600 / 1720 * 1000)
+	(capacity * samp_res * 3600 / 172 * 1000)
 
 #define ADC_TO_CAPACITY_UAH(adc_value, samp_res)	\
-	(adc_value / 3600 * 1720 / samp_res)
+	(adc_value / 3600 * 172 / samp_res)
 #define ADC_TO_CAPACITY_MAH(adc_value, samp_res)	\
-	(adc_value / 1000 * 1720 / 3600 / samp_res)
+	(adc_value / 1000 * 172 / 3600 / samp_res)
 
 /* charger type definition */
 enum charger_type {
@@ -479,15 +481,9 @@ static void rk817_bat_init_coulomb_cap(struct rk817_battery_device *battery,
 		rk817_bat_write(battery, Q_INIT_H2, buf);
 		buf = (cap >> 8) & 0xff;
 		rk817_bat_write(battery, Q_INIT_L1, buf);
-
 		buf = (cap >> 0) & 0xff;
-		val = rk817_bat_read(battery, Q_INIT_L0);
-		if (val == buf) {
-			rk817_bat_write(battery, Q_INIT_L0, buf + 1);
-			cap += 1;
-		} else {
-			rk817_bat_write(battery, Q_INIT_L0, buf);
-		}
+		rk817_bat_write(battery, Q_INIT_L0, buf);
+
 		val = rk817_bat_read(battery, Q_INIT_H3) << 24;
 		val |= rk817_bat_read(battery, Q_INIT_H2) << 16;
 		val |= rk817_bat_read(battery, Q_INIT_L1) << 8;
@@ -519,9 +515,9 @@ static u32 rk817_bat_get_capacity_uah(struct rk817_battery_device *battery)
 	return  capacity;
 }
 
-static int rk817_bat_get_capacity_mah(struct rk817_battery_device *battery)
+static u32 rk817_bat_get_capacity_mah(struct rk817_battery_device *battery)
 {
-	int val, capacity = 0;
+	u32 val, capacity = 0;
 
 	if (rk817_bat_remain_cap_is_valid(battery)) {
 		val = rk817_bat_read(battery, Q_PRES_H3) << 24;
@@ -791,15 +787,16 @@ static void rk817_bat_not_first_pwron(struct rk817_battery_device *battery)
 	pre_soc = rk817_bat_get_prev_dsoc(battery);
 	pre_cap = rk817_bat_get_prev_cap(battery);
 
-	now_cap = rk817_bat_get_capacity_uah(battery) / 1000;
+	now_cap = rk817_bat_get_capacity_mah(battery);
 	battery->halt_cnt = rk817_bat_get_halt_cnt(battery);
 	battery->nac = rk817_bat_vol_to_cap(battery,
 					    battery->pwron_voltage);
+	battery->remain_cap = pre_cap * 1000;
 	battery->is_halt = is_rk817_bat_last_halt(battery);
 
 	DBG("now_cap: %d, pre_cap: %d\n", now_cap, pre_cap);
-	/* determine if there is charging */
-	if ((now_cap > 0) && (now_cap > pre_cap + 10)) {
+
+	if (now_cap > pre_cap) {
 		if (now_cap >= battery->fcc)
 			now_cap = battery->fcc;
 
@@ -815,8 +812,8 @@ static void rk817_bat_not_first_pwron(struct rk817_battery_device *battery)
 	}
 
 	rk817_bat_init_coulomb_cap(battery, pre_cap);
-
-	battery->remain_cap = rk817_bat_get_capacity_uah(battery);
+	rk817_bat_init_coulomb_cap(battery, pre_cap + 1);
+	rk817_bat_get_capacity_mah(battery);
 
 	battery->dsoc = pre_soc;
 	if (battery->dsoc > 100000)
@@ -1211,10 +1208,11 @@ static int rk817_is_bat_exist(struct rk817_battery_device *battery)
 
 static int rk817_bat_bat_is_exist(struct udevice *dev)
 {
-	struct rk817_battery_device *battery = dev_get_priv(dev);
+        struct rk817_battery_device *battery = dev_get_priv(dev);
 
-	return rk817_is_bat_exist(battery);
+        return rk817_is_bat_exist(battery);
 }
+
 
 static struct dm_fuel_gauge_ops fg_ops = {
 	.bat_is_exist = rk817_bat_bat_is_exist,
@@ -1297,12 +1295,11 @@ static int rk817_fg_ofdata_to_platdata(struct udevice *dev)
 		battery->drv_version = 0;
 
 	value = dev_read_u32_default(dev, "sample_res", -1);
-	if (value < 0) {
+	if (battery->res_div < 0)
 		printf("read sample_res error\n");
-		battery->res_div = SAMPLE_RES_10mR;
-	} else {
-		battery->res_div = value;
-	}
+
+	battery->res_div = (value == SAMPLE_RES_20mR) ?
+		       SAMPLE_RES_DIV2 : SAMPLE_RES_DIV1;
 
 	DBG("OCV Value:");
 	for (i = 0; i < battery->ocv_size; i++)
